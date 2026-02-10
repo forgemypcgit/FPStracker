@@ -21,12 +21,36 @@ curl_download() {
   local url out
   url="$1"
   out="$2"
+  if [[ "$url" == http://* ]]; then
+    if [[ "$url" =~ ^http://(127\.0\.0\.1|localhost)(:[0-9]+)?/ ]] \
+      || [[ "${FPS_TRACKER_ALLOW_INSECURE_HTTP:-0}" == "1" ]]; then
+      curl -fL --retry 3 --retry-delay 1 -sS "$url" -o "$out"
+      return 0
+    fi
+
+    echo "Refusing insecure HTTP download: $url" >&2
+    echo "Use https, or set FPS_TRACKER_ALLOW_INSECURE_HTTP=1 (not recommended)." >&2
+    return 1
+  fi
+
   curl --proto '=https' --tlsv1.2 -fL --retry 3 --retry-delay 1 -sS "$url" -o "$out"
 }
 
 curl_text() {
   local url
   url="$1"
+  if [[ "$url" == http://* ]]; then
+    if [[ "$url" =~ ^http://(127\.0\.0\.1|localhost)(:[0-9]+)?/ ]] \
+      || [[ "${FPS_TRACKER_ALLOW_INSECURE_HTTP:-0}" == "1" ]]; then
+      curl -fsSL --retry 3 --retry-delay 1 -sS "$url"
+      return 0
+    fi
+
+    echo "Refusing insecure HTTP request: $url" >&2
+    echo "Use https, or set FPS_TRACKER_ALLOW_INSECURE_HTTP=1 (not recommended)." >&2
+    return 1
+  fi
+
   curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --retry-delay 1 -sS "$url"
 }
 
@@ -256,7 +280,7 @@ main() {
   fi
 
   tmp_dir="$(mktemp -d)"
-  trap 'rm -rf "$tmp_dir"' EXIT
+  trap 'rm -rf "${tmp_dir:-}"' EXIT
 
   archive="${tmp_dir}/${asset_name}"
   checksum="${tmp_dir}/${asset_name}.sha256"
