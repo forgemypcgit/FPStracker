@@ -1,0 +1,94 @@
+[package]
+name = "fps_tracker"
+version = "0.2.0"
+edition = "2021"
+description = "FPS tracker with hardware detection for PC Builder benchmark collection"
+license = "PolyForm-Noncommercial-1.0.0"
+authors = ["ForgeMyPC"]
+readme = "README.md"
+repository = "https://github.com/forgemypcgit/FPStracker"
+homepage = "https://github.com/forgemypcgit/FPStracker"
+keywords = ["fps", "benchmark", "gaming", "cli"]
+categories = ["command-line-utilities", "games", "development-tools::profiling"]
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.43", features = ["full"] }
+
+# HTTP client for API (using rustls to avoid OpenSSL dependency)
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# System information (CPU, RAM, etc.)
+sysinfo = "0.33"
+
+# CLI interface
+clap = { version = "4.5", features = ["derive"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "2.0"
+
+# UUID for session/benchmark IDs
+uuid = { version = "1.12", features = ["v4", "serde"] }
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# Configuration file
+toml = "0.8"
+directories = "6.0"
+
+# Terminal UI
+crossterm = "0.29"
+ratatui = "0.30"
+
+# Colored terminal output
+colored = "2.2"
+
+# Web Server for Interactive UI
+axum = { version = "0.7", features = ["http2", "ws", "macros"] }
+tower-http = { version = "0.5", features = ["fs", "cors", "trace"] }
+rust-embed = "8.2.0"
+mime_guess = "2.0"
+open = "5.0"
+
+[dev-dependencies]
+tempfile = "3.14"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+tempfile = "3.14"
+windows-sys = { version = "0.59", features = [
+  "Win32_Foundation",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Threading",
+  "Win32_UI_WindowsAndMessaging",
+] }
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true
+
+[[bin]]
+name = "fps-tracker"
+path = "src/main.rs"
+
+[package.metadata.dist]
+# Optional metadata consumed by release tooling.
+cargo-dist-version = "0.25.1"
+ci = ["github"]
+installers = ["shell", "powershell"]
+targets = [
+  "x86_64-unknown-linux-gnu",
+  "x86_64-apple-darwin",
+  "aarch64-apple-darwin",
+  "x86_64-pc-windows-msvc",
+]

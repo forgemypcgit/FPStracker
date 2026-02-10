@@ -1,0 +1,289 @@
+@import url("https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=JetBrains+Mono:wght@400;600&family=Manrope:wght@400;500;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  * {
+    @apply border-ash/30;
+  }
+
+  body {
+    @apply min-h-screen bg-void text-pearl antialiased;
+    background-image:
+      radial-gradient(ellipse 80% 50% at 50% -20%, rgba(25, 212, 255, 0.07), transparent),
+      radial-gradient(ellipse 40% 30% at 80% 60%, rgba(121, 242, 166, 0.03), transparent),
+      linear-gradient(180deg, #05070c 0%, #0a0f18 100%);
+  }
+
+  h1,
+  h2,
+  h3 {
+    @apply font-display tracking-wide;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-ash/60;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-ash;
+  }
+}
+
+@layer components {
+  /* ─── Layout ──────────────────────────────────────────── */
+  .app-shell {
+    @apply relative min-h-screen overflow-hidden text-pearl;
+  }
+
+  .page-wrap {
+    @apply relative mx-auto w-full max-w-5xl px-5 py-12 sm:px-8;
+  }
+
+  /* ─── Ambient Grid Background ─────────────────────────── */
+  .ambient-grid {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-image:
+      linear-gradient(rgba(25, 212, 255, 0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(25, 212, 255, 0.03) 1px, transparent 1px);
+    background-size: 64px 64px;
+    mask-image: radial-gradient(ellipse 60% 50% at 50% 30%, black 20%, transparent 70%);
+    -webkit-mask-image: radial-gradient(ellipse 60% 50% at 50% 30%, black 20%, transparent 70%);
+  }
+
+  /* ─── Panels ──────────────────────────────────────────── */
+  .panel {
+    @apply relative rounded-2xl border border-ash/30 bg-obsidian/60 p-6 backdrop-blur-sm;
+    box-shadow: inset 0 1px 0 0 rgba(255,255,255,0.04), 0 4px 24px rgba(0,0,0,0.15);
+  }
+
+  .panel-glow {
+    @apply relative rounded-2xl border border-ash/30 bg-obsidian/60 p-6 backdrop-blur-sm;
+    box-shadow:
+      inset 0 1px 0 0 rgba(255,255,255,0.04),
+      0 4px 24px rgba(0,0,0,0.15),
+      0 0 0 1px rgba(25, 212, 255, 0.06);
+  }
+
+  .panel-glow::before {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(
+      135deg,
+      rgba(25, 212, 255, 0.15) 0%,
+      transparent 40%,
+      transparent 60%,
+      rgba(121, 242, 166, 0.08) 100%
+    );
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+
+  .panel-soft {
+    @apply rounded-xl bg-smoke/40 p-4;
+    box-shadow: inset 0 1px 0 0 rgba(255,255,255,0.03);
+  }
+
+  /* ─── Typography ──────────────────────────────────────── */
+  .gradient-text {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(135deg, #19d4ff 0%, #79f2a6 60%);
+  }
+
+  .gradient-text-warm {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(135deg, #ffb454 0%, #ff6b6b 100%);
+  }
+
+  .label {
+    @apply mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.15em] text-silver;
+  }
+
+  .section-label {
+    @apply text-[11px] font-bold uppercase tracking-[0.18em] text-silver/70;
+  }
+
+  /* ─── Inputs ──────────────────────────────────────────── */
+  .input-base {
+    @apply w-full rounded-lg border border-ash/50 bg-smoke/60 px-3.5 py-2.5 text-sm text-pearl
+           placeholder:text-silver/40 outline-none transition-all duration-200
+           focus:border-oracle/50 focus:ring-2 focus:ring-oracle/15;
+    box-shadow: inset 0 1px 2px rgba(0,0,0,0.15);
+  }
+
+  .input-base:focus {
+    box-shadow: inset 0 1px 2px rgba(0,0,0,0.15), 0 0 0 3px rgba(25, 212, 255, 0.08);
+  }
+
+  /* ─── Buttons ─────────────────────────────────────────── */
+  .btn-primary {
+    @apply relative inline-flex items-center justify-center gap-2 rounded-xl bg-oracle px-6 py-3
+           text-sm font-semibold text-void transition-all duration-200
+           hover:-translate-y-px hover:shadow-lg hover:shadow-oracle/25
+           active:translate-y-0 active:shadow-none
+           disabled:pointer-events-none disabled:opacity-50;
+  }
+
+  .btn-primary::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: linear-gradient(180deg, rgba(255,255,255,0.15) 0%, transparent 50%);
+    pointer-events: none;
+  }
+
+  .btn-secondary {
+    @apply relative inline-flex items-center justify-center gap-2 rounded-xl border border-ash/50
+           bg-smoke/50 px-6 py-3 text-sm font-semibold text-pearl transition-all duration-200
+           hover:border-ash hover:bg-smoke/80 hover:text-white;
+    box-shadow: inset 0 1px 0 0 rgba(255,255,255,0.04);
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5
+           text-sm font-medium text-silver transition-all duration-200
+           hover:bg-smoke/50 hover:text-white;
+  }
+
+  /* ─── Badges ──────────────────────────────────────────── */
+  .badge {
+    @apply inline-flex items-center rounded-full bg-smoke/80 px-2.5 py-1
+           text-[11px] font-medium tracking-wide text-silver;
+    box-shadow: inset 0 1px 0 0 rgba(255,255,255,0.04);
+  }
+
+  .badge-oracle {
+    @apply inline-flex items-center rounded-full bg-oracle/10 px-2.5 py-1
+           text-[11px] font-semibold tracking-wide text-oracle;
+  }
+
+  .badge-optimal {
+    @apply inline-flex items-center rounded-full bg-optimal/10 px-2.5 py-1
+           text-[11px] font-semibold tracking-wide text-optimal;
+  }
+
+  .badge-caution {
+    @apply inline-flex items-center rounded-full bg-caution/10 px-2.5 py-1
+           text-[11px] font-semibold tracking-wide text-caution;
+  }
+
+  .badge-critical {
+    @apply inline-flex items-center rounded-full bg-critical/10 px-2.5 py-1
+           text-[11px] font-semibold tracking-wide text-critical;
+  }
+
+  /* ─── Shimmer Loading ─────────────────────────────────── */
+  .shimmer {
+    @apply relative overflow-hidden;
+  }
+
+  .shimmer::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      90deg,
+      transparent 25%,
+      rgba(25, 212, 255, 0.04) 50%,
+      transparent 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 2.5s ease-in-out infinite;
+  }
+
+  /* ─── Floating Orbs ───────────────────────────────────── */
+  .orb {
+    @apply pointer-events-none absolute rounded-full blur-3xl;
+  }
+
+  .orb-oracle {
+    background: radial-gradient(circle, rgba(25, 212, 255, 0.12) 0%, transparent 70%);
+  }
+
+  .orb-optimal {
+    background: radial-gradient(circle, rgba(121, 242, 166, 0.08) 0%, transparent 70%);
+  }
+
+  .orb-caution {
+    background: radial-gradient(circle, rgba(255, 180, 84, 0.06) 0%, transparent 70%);
+  }
+
+  /* ─── Divider ─────────────────────────────────────────── */
+  .divider {
+    @apply h-px w-full bg-gradient-to-r from-transparent via-ash/40 to-transparent;
+  }
+
+  /* ─── Spotlight Hover (for cards) ─────────────────────── */
+  .spotlight-card {
+    @apply relative overflow-hidden;
+  }
+
+  .spotlight-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(25, 212, 255, 0.3) 50%,
+      transparent 100%
+    );
+    opacity: 0;
+    transition: opacity 0.3s ease;
+  }
+
+  .spotlight-card:hover::before {
+    opacity: 1;
+  }
+
+  /* ─── Ring Gauge ──────────────────────────────────────── */
+  .gauge-ring {
+    transform: rotate(-90deg);
+    transform-origin: center;
+  }
+
+  .gauge-ring circle {
+    transition: stroke-dashoffset 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  /* ─── Stagger Children Animation ──────────────────────── */
+  .stagger-children > * {
+    animation: fade-in-up 0.5s ease-out both;
+  }
+  .stagger-children > *:nth-child(1) { animation-delay: 0ms; }
+  .stagger-children > *:nth-child(2) { animation-delay: 80ms; }
+  .stagger-children > *:nth-child(3) { animation-delay: 160ms; }
+  .stagger-children > *:nth-child(4) { animation-delay: 240ms; }
+  .stagger-children > *:nth-child(5) { animation-delay: 320ms; }
+  .stagger-children > *:nth-child(6) { animation-delay: 400ms; }
+
+  @keyframes fade-in-up {
+    0% { opacity: 0; transform: translateY(16px); }
+    100% { opacity: 1; transform: 0; }
+  }
+}

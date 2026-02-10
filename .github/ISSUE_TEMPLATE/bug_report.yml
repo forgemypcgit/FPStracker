@@ -1,0 +1,59 @@
+name: Bug report
+description: Report a reproducible bug in the CLI, capture flow, or installer.
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please include enough detail to reproduce.
+
+  - type: input
+    id: version
+    attributes:
+      label: fps-tracker version
+      description: Output of `fps-tracker --version`
+      placeholder: v0.2.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - Linux
+        - macOS
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: Command used
+      description: Exact command and flags used.
+      placeholder: fps-tracker benchmark preview --source presentmon --process-name game.exe
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / screenshots / artifacts
+      description: Include relevant output (redact secrets).

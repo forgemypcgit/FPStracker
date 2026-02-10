@@ -1,0 +1,153 @@
+name: Publish Package Managers
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish (e.g., v0.2.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  prepare-manifests:
+    name: Prepare manifests
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      version: ${{ steps.meta.outputs.version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Resolve release metadata
+        id: meta
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "release" ]]; then
+            tag="${{ github.event.release.tag_name }}"
+          else
+            tag="${{ inputs.tag }}"
+          fi
+
+          if [[ -z "$tag" ]]; then
+            echo "Could not resolve release tag." >&2
+            exit 1
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Download release checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p dist
+          gh release download "${{ steps.meta.outputs.tag }}" \
+            --pattern "*.sha256" \
+            --dir dist
+
+      - name: Generate package-manager manifests
+        run: |
+          ./scripts/generate-package-manifests.sh "${{ steps.meta.outputs.tag }}" dist
+
+      - name: Upload manifest bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: package-manifests
+          path: dist/package-managers
+
+  publish-homebrew:
+    name: Publish Homebrew formula PR
+    runs-on: ubuntu-latest
+    needs: prepare-manifests
+    if: ${{ secrets.HOMEBREW_TAP_TOKEN != '' && vars.HOMEBREW_TAP_REPO != '' }}
+
+    steps:
+      - name: Checkout Homebrew tap
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          repository: ${{ vars.HOMEBREW_TAP_REPO }}
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Download generated manifests
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: package-manifests
+          path: dist/package-managers
+
+      - name: Update formula
+        run: |
+          mkdir -p tap/Formula
+          cp dist/package-managers/homebrew/fps-tracker.rb tap/Formula/fps-tracker.rb
+
+      - name: Create pull request
+        uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676
+        with:
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+          commit-message: "chore: update fps-tracker formula to ${{ needs.prepare-manifests.outputs.tag }}"
+          branch: "automation/fps-tracker-homebrew-${{ needs.prepare-manifests.outputs.version }}-${{ github.run_id }}"
+          title: "chore: update fps-tracker to ${{ needs.prepare-manifests.outputs.tag }}"
+          body: |
+            Automated update for release `${{ needs.prepare-manifests.outputs.tag }}`.
+
+            - Source release: https://github.com/${{ github.repository }}/releases/tag/${{ needs.prepare-manifests.outputs.tag }}
+            - Formula file: `Formula/fps-tracker.rb`
+          base: main
+          labels: |
+            automated-pr
+
+  publish-winget:
+    name: Publish winget manifest PR
+    runs-on: ubuntu-latest
+    needs: prepare-manifests
+    if: ${{ secrets.WINGET_PAT != '' && vars.WINGET_TARGET_REPO != '' && vars.WINGET_FORK_REPO != '' }}
+
+    steps:
+      - name: Checkout winget target repo
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          repository: ${{ vars.WINGET_TARGET_REPO }}
+          path: winget
+          sparse-checkout: |
+            manifests/p/PCBuilder/FPSTracker
+
+      - name: Download generated manifests
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: package-manifests
+          path: dist/package-managers
+
+      - name: Update manifest files
+        env:
+          VERSION: ${{ needs.prepare-manifests.outputs.version }}
+        run: |
+          dest="winget/manifests/p/PCBuilder/FPSTracker/${VERSION}"
+          src="dist/package-managers/winget/manifests/p/PCBuilder/FPSTracker/${VERSION}"
+          mkdir -p "$dest"
+          cp "$src"/*.yaml "$dest/"
+
+      - name: Create pull request
+        uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676
+        with:
+          token: ${{ secrets.WINGET_PAT }}
+          path: winget
+          push-to-fork: ${{ vars.WINGET_FORK_REPO }}
+          commit-message: "chore: update PCBuilder.FPSTracker to ${{ needs.prepare-manifests.outputs.tag }}"
+          branch: "automation/fps-tracker-winget-${{ needs.prepare-manifests.outputs.version }}-${{ github.run_id }}"
+          title: "chore: update PCBuilder.FPSTracker to ${{ needs.prepare-manifests.outputs.tag }}"
+          body: |
+            Automated manifest update for release `${{ needs.prepare-manifests.outputs.tag }}`.
+
+            - Source release: https://github.com/${{ github.repository }}/releases/tag/${{ needs.prepare-manifests.outputs.tag }}
+            - Identifier: `PCBuilder.FPSTracker`
+          base: master
+          labels: |
+            automated-pr

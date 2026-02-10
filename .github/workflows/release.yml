@@ -1,0 +1,173 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish (e.g., v0.2.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: fps-tracker-x86_64-unknown-linux-gnu.tar.gz
+          - os: macos-13
+            target: x86_64-apple-darwin
+            artifact_name: fps-tracker-x86_64-apple-darwin.tar.gz
+          - os: macos-14
+            target: aarch64-apple-darwin
+            artifact_name: fps-tracker-aarch64-apple-darwin.tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: fps-tracker-x86_64-pc-windows-msvc.zip
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Smoke test binary (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          BIN="target/${{ matrix.target }}/release/fps-tracker"
+          "$BIN" --help
+          "$BIN" benchmark preview --help
+          "$BIN" install-info
+
+      - name: Smoke test binary (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $bin = "target/${{ matrix.target }}/release/fps-tracker.exe"
+          & $bin --help
+          & $bin benchmark preview --help
+          & $bin install-info
+
+      - name: Package artifact (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          tar -czf "${{ matrix.artifact_name }}" -C "target/${{ matrix.target }}/release" fps-tracker
+          shasum -a 256 "${{ matrix.artifact_name }}" | awk '{print $1 "  " $2}' > "${{ matrix.artifact_name }}.sha256"
+
+      - name: Package artifact (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "target/${{ matrix.target }}/release/fps-tracker.exe" -DestinationPath "${{ matrix.artifact_name }}" -Force
+          $hash = (Get-FileHash -Algorithm SHA256 "${{ matrix.artifact_name }}").Hash.ToLower()
+          "$hash  ${{ matrix.artifact_name }}" | Out-File -FilePath "${{ matrix.artifact_name }}.sha256" -Encoding ascii
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            ${{ matrix.artifact_name }}
+            ${{ matrix.artifact_name }}.sha256
+
+  release:
+    name: Sign + Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: write
+    env:
+      COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+      COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Resolve release tag
+        id: release_meta
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            tag="${{ inputs.tag }}"
+          else
+            tag="${GITHUB_REF_NAME}"
+          fi
+
+          if [[ ! "$tag" =~ ^v[0-9] ]]; then
+            echo "Invalid release tag: $tag" >&2
+            exit 1
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Download built artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          path: dist
+
+      - name: Determine signing mode
+        id: signing
+        shell: bash
+        run: |
+          if [[ -n "${COSIGN_PRIVATE_KEY}" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac
+        if: steps.signing.outputs.enabled == 'true'
+
+      - name: Create consolidated checksums file
+        run: |
+          find dist -type f -name '*.sha256' -print0 | xargs -0 cat > dist/SHA256SUMS
+
+      - name: Export public key
+        if: steps.signing.outputs.enabled == 'true'
+        run: |
+          cosign public-key --key env://COSIGN_PRIVATE_KEY > dist/cosign.pub
+
+      - name: Sign release artifacts
+        if: steps.signing.outputs.enabled == 'true'
+        run: |
+          while IFS= read -r -d '' artifact; do
+            cosign sign-blob --yes --key env://COSIGN_PRIVATE_KEY --output-signature "${artifact}.sig" "$artifact"
+          done < <(find dist -type f \( -name '*.tar.gz' -o -name '*.zip' \) -print0)
+
+      - name: Generate Homebrew + winget manifests
+        run: |
+          ./scripts/generate-package-manifests.sh "${{ steps.release_meta.outputs.tag }}" dist
+
+      - name: Publish release assets
+        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b
+        with:
+          tag_name: ${{ steps.release_meta.outputs.tag }}
+          fail_on_unmatched_files: false
+          files: |
+            dist/**/*.tar.gz
+            dist/**/*.zip
+            dist/**/*.sha256
+            dist/**/*.sig
+            dist/SHA256SUMS
+            dist/cosign.pub
+            dist/package-managers/homebrew/fps-tracker.rb
+            dist/package-managers/winget/**/*.yaml
+          generate_release_notes: true
