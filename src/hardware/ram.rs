@@ -7,9 +7,10 @@
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::fs;
-use std::path::Path;
 use std::process::Command;
+
+#[cfg(target_os = "linux")]
+use std::{fs, path::Path};
 
 #[cfg(target_os = "linux")]
 type DmidecodeInfo = (Option<u64>, Option<String>, Option<u32>, Option<String>);

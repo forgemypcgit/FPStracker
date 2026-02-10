@@ -25,3 +25,6 @@ node_modules/
 # Local env
 .env
 .env.*
+
+# Local toolchains used for cross-compilation during development
+.tools/

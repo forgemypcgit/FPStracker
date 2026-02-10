@@ -9,9 +9,13 @@
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::fs;
-use std::path::Path;
 use std::process::Command;
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+use std::fs;
+
+#[cfg(target_os = "linux")]
+use std::path::Path;
 
 /// GPU vendor
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

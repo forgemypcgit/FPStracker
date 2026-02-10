@@ -7,9 +7,13 @@
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::fs;
-use std::path::Path;
 use sysinfo::System;
+
+#[cfg(target_os = "linux")]
+use std::{fs, path::Path};
+
+#[cfg(target_os = "windows")]
+use std::process::Command;
 
 /// CPU information
 #[derive(Debug, Clone, Serialize, Deserialize)]
