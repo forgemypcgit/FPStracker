@@ -1,0 +1,279 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish (e.g., v0.2.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    env:
+      # Optional Windows Authenticode signing inputs.
+      # Exposed via `env` so we can safely gate steps without using `secrets.*` in `if:` expressions.
+      CODESIGN_CERT_PFX_B64: ${{ secrets.WINDOWS_CODESIGN_CERT_PFX_B64 }}
+      CODESIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_CERT_PASSWORD }}
+      CODESIGN_TIMESTAMP_URL: ${{ secrets.WINDOWS_CODESIGN_TIMESTAMP_URL }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: fps-tracker-x86_64-unknown-linux-gnu.tar.gz
+            extra_paths: ""
+          - os: macos-14
+            target: x86_64-apple-darwin
+            artifact_name: fps-tracker-x86_64-apple-darwin.tar.gz
+            extra_paths: ""
+          - os: macos-14
+            target: aarch64-apple-darwin
+            artifact_name: fps-tracker-aarch64-apple-darwin.tar.gz
+            extra_paths: ""
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: fps-tracker-x86_64-pc-windows-msvc.zip
+            extra_paths: |
+              fps-tracker-x86_64-pc-windows-msvc.exe
+              fps-tracker-x86_64-pc-windows-msvc.exe.sha256
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Smoke test binary (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          BIN="target/${{ matrix.target }}/release/fps-tracker"
+          "$BIN" --help
+          "$BIN" benchmark preview --help
+          "$BIN" install-info
+
+      - name: Smoke test binary (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $bin = "target/${{ matrix.target }}/release/fps-tracker.exe"
+          & $bin --help
+          & $bin benchmark preview --help
+          & $bin install-info
+
+      - name: Sign Windows binary (optional Authenticode)
+        # Note: GitHub Actions does not allow `secrets.*` in `if:` expressions.
+        # Route through env (populated from secrets) and gate on emptiness instead.
+        if: runner.os == 'Windows' && env.CODESIGN_CERT_PFX_B64 != ''
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:CODESIGN_CERT_PASSWORD)) {
+            throw "WINDOWS_CODESIGN_CERT_PASSWORD is required when WINDOWS_CODESIGN_CERT_PFX_B64 is set."
+          }
+
+          $signtool = (Get-Command signtool.exe -ErrorAction SilentlyContinue)?.Source
+          if (-not $signtool) {
+            throw "signtool.exe not found on runner."
+          }
+
+          $certPath = Join-Path $env:RUNNER_TEMP "fps-tracker-codesign.pfx"
+          [System.IO.File]::WriteAllBytes(
+            $certPath,
+            [System.Convert]::FromBase64String($env:CODESIGN_CERT_PFX_B64)
+          )
+
+          $timestampUrl = $env:CODESIGN_TIMESTAMP_URL
+          if ([string]::IsNullOrWhiteSpace($timestampUrl)) {
+            $timestampUrl = "http://timestamp.digicert.com"
+          }
+
+          $bin = "target/${{ matrix.target }}/release/fps-tracker.exe"
+          & $signtool sign /fd SHA256 /td SHA256 /tr $timestampUrl /f $certPath /p $env:CODESIGN_CERT_PASSWORD $bin
+          if ($LASTEXITCODE -ne 0) {
+            throw "signtool sign failed with exit code $LASTEXITCODE"
+          }
+
+          & $signtool verify /pa /v $bin
+          if ($LASTEXITCODE -ne 0) {
+            throw "signtool verify failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Package artifact (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          tar -czf "${{ matrix.artifact_name }}" -C "target/${{ matrix.target }}/release" fps-tracker
+          python3 - <<'PY'
+          import hashlib
+          import pathlib
+          
+          artifact = pathlib.Path("${{ matrix.artifact_name }}")
+          digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+          pathlib.Path(f"{artifact.name}.sha256").write_text(f"{digest}  {artifact.name}\n", encoding="ascii")
+          PY
+
+      - name: Package artifact (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $exeName = "fps-tracker-${{ matrix.target }}.exe"
+          Copy-Item -Path "target/${{ matrix.target }}/release/fps-tracker.exe" -Destination $exeName -Force
+          Compress-Archive -Path "target/${{ matrix.target }}/release/fps-tracker.exe" -DestinationPath "${{ matrix.artifact_name }}" -Force
+          $exeHash = (Get-FileHash -Algorithm SHA256 $exeName).Hash.ToLower()
+          "$exeHash  $exeName" | Out-File -FilePath "${exeName}.sha256" -Encoding ascii
+          $hash = (Get-FileHash -Algorithm SHA256 "${{ matrix.artifact_name }}").Hash.ToLower()
+          "$hash  ${{ matrix.artifact_name }}" | Out-File -FilePath "${{ matrix.artifact_name }}.sha256" -Encoding ascii
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            ${{ matrix.artifact_name }}
+            ${{ matrix.artifact_name }}.sha256
+            ${{ matrix.extra_paths }}
+
+  release:
+    name: Sign + Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: write
+    env:
+      # Base64-encoded cosign private key (generated via `cosign generate-key-pair`).
+      # Keeping it base64 avoids newline/formatting issues in GitHub Secrets.
+      COSIGN_PRIVATE_KEY_B64: ${{ secrets.COSIGN_PRIVATE_KEY_B64 }}
+      COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Resolve release tag
+        id: release_meta
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            tag="${{ inputs.tag }}"
+          else
+            tag="${GITHUB_REF_NAME}"
+          fi
+
+          if [[ ! "$tag" =~ ^v[0-9] ]]; then
+            echo "Invalid release tag: $tag" >&2
+            exit 1
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Download built artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          path: dist
+
+      - name: Determine signing mode
+        id: signing
+        shell: bash
+        run: |
+          if [[ -n "${COSIGN_PRIVATE_KEY_B64}" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac
+        if: steps.signing.outputs.enabled == 'true'
+
+      - name: Materialize signing key
+        if: steps.signing.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          key_path="$RUNNER_TEMP/cosign.key"
+          printf '%s' "${COSIGN_PRIVATE_KEY_B64}" | base64 -d > "$key_path"
+          chmod 600 "$key_path"
+          echo "COSIGN_KEY_PATH=$key_path" >> "$GITHUB_ENV"
+
+      - name: Create consolidated checksums file
+        run: |
+          find dist -type f -name '*.sha256' -print0 | xargs -0 cat > dist/SHA256SUMS
+
+      - name: Export public key
+        if: steps.signing.outputs.enabled == 'true'
+        run: |
+          cosign public-key --key "${COSIGN_KEY_PATH}" > dist/cosign.pub
+
+      - name: Validate installer embedded public keys
+        if: steps.signing.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          extract_pubkey() {
+            local source="$1"
+            awk '
+              /-----BEGIN PUBLIC KEY-----/ {capture=1}
+              capture {print}
+              /-----END PUBLIC KEY-----/ && capture {exit}
+            ' "$source"
+          }
+
+          compare_key() {
+            local source="$1"
+            local extracted
+            extracted="$(mktemp)"
+            extract_pubkey "$source" > "$extracted"
+            if [[ ! -s "$extracted" ]]; then
+              echo "No embedded public key found in $source" >&2
+              exit 1
+            fi
+            diff -u dist/cosign.pub "$extracted"
+            rm -f "$extracted"
+          }
+
+          compare_key scripts/install.sh
+          compare_key scripts/install.ps1
+
+      - name: Sign release artifacts
+        if: steps.signing.outputs.enabled == 'true'
+        run: |
+          while IFS= read -r -d '' artifact; do
+            cosign sign-blob --yes --key "${COSIGN_KEY_PATH}" --output-signature "${artifact}.sig" "$artifact"
+          done < <(find dist -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.exe' \) -print0)
+
+      - name: Generate Homebrew + winget manifests
+        run: |
+          ./scripts/generate-package-manifests.sh "${{ steps.release_meta.outputs.tag }}" dist
+
+      - name: Publish release assets
+        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b
+        with:
+          tag_name: ${{ steps.release_meta.outputs.tag }}
+          fail_on_unmatched_files: false
+          files: |
+            dist/**/*.tar.gz
+            dist/**/*.zip
+            dist/**/*.exe
+            dist/**/*.sha256
+            dist/**/*.sig
+            dist/SHA256SUMS
+            dist/cosign.pub
+            dist/package-managers/homebrew/fps-tracker.rb
+            dist/package-managers/winget/**/*.yaml
+          generate_release_notes: true

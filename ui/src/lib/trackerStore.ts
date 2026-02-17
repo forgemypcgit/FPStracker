@@ -1,0 +1,123 @@
+import { create } from 'zustand';
+import { createJSONStorage, persist } from 'zustand/middleware';
+
+export interface HardwareSpecs {
+  os_family?: 'windows' | 'linux' | 'macos' | 'other';
+  os?: string;
+  os_version?: string;
+  gpu: {
+    name: string;
+    vram_mb: number;
+    clock_mhz?: number;
+    driver_version?: string;
+  };
+  cpu: {
+    name: string;
+    cores: number;
+    threads: number;
+    frequency_mhz?: number;
+  };
+  ram: {
+    total_mb: number;
+    type?: string;
+    speed_mhz?: number;
+  };
+  confidence: number; // 0-1
+}
+
+export interface GameInfo {
+  id: string;
+  name: string;
+  cover_url?: string;
+  has_benchmark: boolean;
+  difficulty?: 'light' | 'medium' | 'heavy' | 'extreme';
+  supports_rt?: boolean;
+  supports_dlss?: boolean;
+  supports_fsr?: boolean;
+  anti_cheat_risk?: 'low' | 'medium' | 'high';
+  benchmark_notes?: string;
+}
+
+export interface BenchmarkData {
+  resolution: string;
+  preset: string;
+  ray_tracing: boolean;
+  upscaling: string; // 'None', 'DLSS Quality', etc.
+  capture_method: 'in_game_counter' | 'built_in_benchmark' | 'external_tool';
+  fps_avg: number;
+  fps_1_low?: number;
+  fps_01_low?: number;
+  test_location?: string;
+  anti_cheat_acknowledged: boolean;
+  anti_cheat_strict_acknowledged?: boolean;
+}
+
+export interface SyntheticBaseline {
+  synthetic_cpu_score?: number;
+  synthetic_cpu_source?: string;
+  synthetic_gpu_score?: number;
+  synthetic_gpu_source?: string;
+  synthetic_ram_score?: number;
+  synthetic_ram_source?: string;
+  synthetic_disk_score?: number;
+  synthetic_disk_source?: string;
+  synthetic_profile?: 'quick' | 'standard' | 'extended';
+  synthetic_suite_version?: string;
+  synthetic_extended?: Record<string, unknown>;
+}
+
+interface TrackerState {
+  // Data
+  hardware: HardwareSpecs | null;
+  syntheticBaseline: SyntheticBaseline | null;
+  selectedGame: GameInfo | null;
+  benchmark: BenchmarkData | null;
+
+  // Flow state
+  syntheticStepSeen: boolean;
+
+  // Actions
+  setHardware: (specs: HardwareSpecs) => void;
+  setSyntheticBaseline: (baseline: SyntheticBaseline | null) => void;
+  markSyntheticStepSeen: () => void;
+  setGame: (game: GameInfo) => void;
+  setBenchmark: (data: BenchmarkData) => void;
+  reset: () => void;
+}
+
+export const useTrackerStore = create<TrackerState>()(
+  persist(
+    (set) => ({
+      hardware: null,
+      syntheticBaseline: null,
+      selectedGame: null,
+      benchmark: null,
+      syntheticStepSeen: false,
+
+      setHardware: (specs) => set({ hardware: specs }),
+      setSyntheticBaseline: (baseline) => set({ syntheticBaseline: baseline }),
+      markSyntheticStepSeen: () => set({ syntheticStepSeen: true }),
+      setGame: (game) => set({ selectedGame: game }),
+      setBenchmark: (data) => set({ benchmark: data }),
+      reset: () =>
+        set({
+        hardware: null,
+        syntheticBaseline: null,
+        selectedGame: null,
+        benchmark: null,
+        syntheticStepSeen: false,
+      }),
+    }),
+    {
+      name: 'fps-tracker-storage',
+      storage: createJSONStorage(() => sessionStorage),
+      // Keep persisted state minimal and short-lived; hardware can be re-detected.
+      partialize: (state) => ({
+        selectedGame: state.selectedGame,
+        benchmark: state.benchmark,
+        syntheticBaseline: state.syntheticBaseline,
+        syntheticStepSeen: state.syntheticStepSeen,
+      }),
+    }
+  )
+);

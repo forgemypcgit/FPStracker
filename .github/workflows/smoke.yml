@@ -1,0 +1,180 @@
+name: Smoke
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Smoke ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7
+
+      - name: Build release
+        run: cargo build --release
+
+      - name: Smoke test (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          BIN="target/release/fps-tracker"
+          "$BIN" --help
+          "$BIN" benchmark preview --help
+          "$BIN" install-info
+
+      - name: Smoke test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $bin = "target/release/fps-tracker.exe"
+          & $bin --help
+          & $bin benchmark preview --help
+          & $bin install-info
+
+  installer-smoke-linux:
+    name: Installer Smoke (Linux)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Package local release payload
+        run: |
+          mkdir -p dist
+          tar -czf dist/fps-tracker-x86_64-unknown-linux-gnu.tar.gz -C target/release fps-tracker
+          sha256sum dist/fps-tracker-x86_64-unknown-linux-gnu.tar.gz \
+            | awk '{print $1 "  fps-tracker-x86_64-unknown-linux-gnu.tar.gz"}' \
+            > dist/fps-tracker-x86_64-unknown-linux-gnu.tar.gz.sha256
+
+      - name: Run installer script end-to-end
+        run: |
+          mkdir -p .smoke-bin
+          python3 -m http.server 8765 --directory dist >/tmp/fps-tracker-http.log 2>&1 &
+          server_pid=$!
+          trap 'kill $server_pid' EXIT
+
+          ready=0
+          for _ in {1..30}; do
+            if curl -fsS http://127.0.0.1:8765/ >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            sleep 0.2
+          done
+          if [[ "$ready" != "1" ]]; then
+            echo "Local release server did not become ready" >&2
+            exit 1
+          fi
+
+          FPS_TRACKER_BASE_URL="http://127.0.0.1:8765" \
+          FPS_TRACKER_VERSION="vtest" \
+          FPS_TRACKER_SKIP_SIGNATURE_VERIFY="1" \
+          FPS_TRACKER_INSTALL_DIR="$PWD/.smoke-bin" \
+          bash ./scripts/install.sh
+
+          "$PWD/.smoke-bin/fps-tracker" --help
+
+  installer-smoke-windows:
+    name: Installer Smoke (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Package local release payload
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          $asset = "dist/fps-tracker-x86_64-pc-windows-msvc.zip"
+          Compress-Archive -Path "target/release/fps-tracker.exe" -DestinationPath $asset -Force
+          $hash = (Get-FileHash -Algorithm SHA256 $asset).Hash.ToLower()
+          "$hash  fps-tracker-x86_64-pc-windows-msvc.zip" | Out-File -FilePath "$asset.sha256" -Encoding ascii
+
+      - name: Run installer script end-to-end
+        shell: pwsh
+        run: |
+          $python = (Get-Command python -ErrorAction SilentlyContinue)?.Source
+          if (-not $python) {
+            $python = (Get-Command py -ErrorAction Stop).Source
+          }
+          $server = Start-Process -FilePath $python -ArgumentList "-m","http.server","8765","--directory","dist" -PassThru -WindowStyle Hidden
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 40; $i++) {
+              try {
+                Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:8765/" -TimeoutSec 2 | Out-Null
+                $ready = $true
+                break
+              }
+              catch {
+                Start-Sleep -Milliseconds 250
+              }
+            }
+            if (-not $ready) {
+              throw "Local release server did not become ready"
+            }
+
+            $env:FPS_TRACKER_BASE_URL = "http://127.0.0.1:8765"
+            $env:FPS_TRACKER_VERSION = "vtest"
+            $env:FPS_TRACKER_SKIP_SIGNATURE_VERIFY = "1"
+            $env:FPS_TRACKER_SKIP_PATH_UPDATE = "1"
+            $env:FPS_TRACKER_INSTALL_DIR = Join-Path $pwd ".smoke-bin"
+
+            & pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/install.ps1
+            $bin = Join-Path $env:FPS_TRACKER_INSTALL_DIR "fps-tracker.exe"
+            & $bin --help
+            & $bin doctor --fix --yes --windows-runtime
+
+            $presentMon = (Get-Command presentmon -ErrorAction SilentlyContinue)?.Source
+            if (-not $presentMon) {
+              $linkPath = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links\presentmon.exe"
+              if (Test-Path $linkPath) {
+                $presentMon = $linkPath
+              }
+            }
+            if (-not $presentMon) {
+              $toolPath = Join-Path $env:LOCALAPPDATA "fps-tracker\tools\presentmon\presentmon.exe"
+              if (Test-Path $toolPath) {
+                $presentMon = $toolPath
+              }
+            }
+            if (-not $presentMon) {
+              throw "PresentMon executable was not found after doctor --fix"
+            }
+            & $presentMon --help *> $null
+            if ($LASTEXITCODE -ne 0) {
+              Write-Warning "presentmon --help returned exit code $LASTEXITCODE; treating as non-fatal for smoke."
+              $global:LASTEXITCODE = 0
+            }
+          }
+          finally {
+            Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+          }
